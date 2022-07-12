@@ -1,0 +1,100 @@
+SSH to EMR Cluster
+———————————————————————————————————————
+
+ssh -i Case-Study-KeyPair.pem hadoop@ec2-44-201-42-164.compute-1.amazonaws.com
+
+———————————————————————————————————————
+Connecting to MqSQL DB
+
+mysql -h telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com -P 3306 -u admin -p
+
+
+
+create table crm 
+(
+msisdn varchar(255),
+gender varchar(255),
+year_of_birth int,
+system_status varchar(255),
+mobile_type varchar(255),
+value_segment varchar(255)
+);
+
+
+create table devices 
+(
+	msisdn varchar(255),
+	imei_tac varchar(255),
+	brand_name varchar(255),
+	model_name varchar(255),
+	os_name varchar(255),
+	os_vendor varchar(255)
+);
+
+create table revenue 
+(
+	msisdn varchar(255),
+	week_number int,
+	Revenue_usd float
+);
+
+
+Downloading the data -
+———————————————————————————————————————
+
+wget https://telecom-case-study-ml-hive-sqoop.s3.amazonaws.com/crm1.csv
+wget https://telecom-case-study-ml-hive-sqoop.s3.amazonaws.com/device1.csv
+wget https://telecom-case-study-ml-hive-sqoop.s3.amazonaws.com/rev1.csv 
+
+
+
+Loading data -
+———————————————————————————————————————
+
+load data local infile '/home/hadoop/crm1.csv' into table crm fields terminated by ',' lines terminated by '\n' ignore 1 rows;
+load data local infile '/home/hadoop/device1.csv' into table devices fields terminated by ',' lines terminated by '\n' ignore 1 rows;
+load data local infile '/home/hadoop/rev1.csv' into table revenue fields terminated by ',' lines terminated by '\n' ignore 1 rows;
+
+
+beeline -u jdbc:hive2://localhost:10000/default -n hadoop
+
+Sqoop commands
+———————————————————————————————————————
+
+Mapper - 1
+sqoop import --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --table crm --target-dir /user/hadoop/telco/crm/ --username admin -P -m 1
+
+data from the ‘crm’ table from the database in MySQL is transferred to the HDFS. You can see the transferred data by running this command on your console:
+
+hadoop fs -cat /user/hadoop/telco/crm/part-m-* | head
+
+Mapper - 4
+sqoop import --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --table crm --target-dir /user/hadoop/telco/crm_split4/ --username admin -P -m 4 --split-by year_of_birth
+
+Check the number of partitions
+hadoop fs -ls /user/hadoop/telco/crm_split4/
+
+sqoop import --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --table crm --target-dir /user/hadoop/telco/crm_split4_where/ --username admin -P -m 4 --split-by year_of_birth --where 'gender = "MALE"'
+
+Import devices table
+sqoop import --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --table devices --target-dir /user/hadoop/telco/devices/ --username admin -P -m 1
+
+Import revenue table
+sqoop import --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --table revenue --target-dir /user/hadoop/telco/revenue/ --username admin -P -m 1
+
+
+sqoop eval --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --username admin -P --query "show tables";
+
+To check the files in the Hadoop directory
+hadoop fs -ls /user/hadoop/telco/crm
+hadoop fs -ls /user/hadoop/telco/devices
+hadoop fs -ls /user/hadoop/telco/revenue
+
+sqoop import -Dmapreduce.job.user.classpath.first=true -Dhadoop.security.credential.provider.path=jceks://x.jceks --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --table crm --target-dir /user/hadoop/telco/crm_avro -m 1 --username admin -P --as-avrodatafile
+
+
+sqoop import -Dmapreduce.job.user.classpath.first=true -Dhadoop.security.credential.provider.path=jceks://x.jceks --connect jdbc:mysql://telco-db.ckxhozhjbwfx.us-east-1.rds.amazonaws.com:3306/telco --table devices --target-dir /user/hadoop/telco/devices_avro -m 1 --username admin -P --as-avrodatafile
+
+WITH customer_brands AS (SELECT msisdn, brand_name, model_name FROM device_stg) SELECT msisdn, brand_name FROM customer_brands LIMIT 10;
+
+/home/hadoop/devices_create_table.hql
